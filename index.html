@@ -917,7 +917,7 @@ sendBtn.addEventListener('click', () => {
     const userText = ta.value.trim();
     if (!hasDeposits && /^\/\w+$/.test(userText)) {
       const name = userText.slice(1);
-      const locals = getSlashCommands({ ccCommands: liveState.slashCommands });
+      const locals = getSlashCommands(liveState.slashCommands);
       const cmd = locals.find(c => c.name === name);
       if (cmd) {
         ta.value = '';
