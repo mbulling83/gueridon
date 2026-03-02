@@ -913,13 +913,15 @@ sendBtn.addEventListener('click', () => {
       ssePostAbort(sseCurrentFolder);
     }
   } else if (hasContent) {
-    // Intercept typed slash commands — route through the same handler as the menu
+    // Intercept typed bridge commands (/exit, /abort) and CC-local commands
+    // (/compact, /context, /cost). Non-local CC skills (/close, /commit)
+    // fall through and are sent as prompts.
     const userText = ta.value.trim();
     if (!hasDeposits && /^\/\w+$/.test(userText)) {
       const name = userText.slice(1);
       const locals = getSlashCommands(liveState.slashCommands);
       const cmd = locals.find(c => c.name === name);
-      if (cmd) {
+      if (cmd && (cmd.name === 'exit' || cmd.name === 'abort' || cmd.local)) {
         ta.value = '';
         refreshSendButton();
         handleSlashSelect(cmd);
