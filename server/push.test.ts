@@ -70,26 +70,26 @@ describe("MAX_SUBSCRIPTIONS cap", () => {
     vi.mocked(webpush.sendNotification).mockResolvedValue({} as any);
   });
 
-  it("caps at 5 subscriptions, dropping oldest", () => {
-    // Pre-load 5 subs
+  it("caps at MAX_SUBSCRIPTIONS, dropping oldest", () => {
+    // Pre-load 2 subs (at the cap)
     const existing = new Map<string, webpush.PushSubscription>();
-    for (let i = 1; i <= 5; i++) {
+    for (let i = 1; i <= 2; i++) {
       const s = makeSub(i);
       existing.set(s.endpoint, s);
     }
     _testing.reset(existing);
 
-    // Adding a 6th should drop sub-1 (oldest)
-    addSubscription(makeSub(6));
+    // Adding a 3rd should drop sub-1 (oldest)
+    addSubscription(makeSub(3));
     const subs = _testing.getSubscriptions();
-    expect(subs.size).toBe(5);
+    expect(subs.size).toBe(2);
     expect(subs.has("https://push.example.com/sub-1")).toBe(false);
-    expect(subs.has("https://push.example.com/sub-6")).toBe(true);
+    expect(subs.has("https://push.example.com/sub-3")).toBe(true);
   });
 
   it("never drops the newly added subscription", () => {
     const existing = new Map<string, webpush.PushSubscription>();
-    for (let i = 1; i <= 5; i++) {
+    for (let i = 1; i <= 2; i++) {
       const s = makeSub(i);
       existing.set(s.endpoint, s);
     }

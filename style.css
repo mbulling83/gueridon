@@ -81,7 +81,7 @@ body {
 .msg-user a:link, .msg-user a:visited { color: #8bb8dd; text-decoration: underline; }
 .msg-user a:active { color: var(--accent); }
 
-/* Assistant text — brand orange (scheme A) */
+/* Assistant text — white body, orange accents on headings/bold/blockquotes */
 .msg-assistant {
   align-self: flex-start;
   max-width: 92%;

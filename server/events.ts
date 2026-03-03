@@ -126,7 +126,7 @@ const LEVEL_MAP: Record<BridgeEvent["type"], LogLevel> = {
   "push:subscriptions-load-error": "warn",
   "push:subscribe": "info",
   "push:unsubscribe": "info",
-  "push:send-ok": "debug",
+  "push:send-ok": "info",
   "push:send-fail": "warn",
   "push:expired-cleanup": "info",
   "push:subscribe-prune": "info",

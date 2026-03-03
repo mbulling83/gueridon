@@ -689,16 +689,28 @@ export function buildMergedDelta(pending: PendingDelta): Record<string, unknown>
  * it (content deltas carry partial chunks that overwrite the snapshot's
  * complete text). State events always pass through and clear suppression.
  *
+ * Tool deltas (tool_start, tool_complete) are additive — they set or update
+ * a specific tool_calls[index] entry without corrupting other state. These
+ * pass through even during suppression, so tools dispatched after a mid-turn
+ * reconnect still appear. (gdn-wemazo)
+ *
  * Returns { send: boolean, clearSuppression: boolean }.
  */
 export function shouldSendEvent(
   event: string,
   suppressDeltas: boolean,
+  deltaType?: string,
 ): { send: boolean; clearSuppression: boolean } {
   if (event === "state") {
     return { send: true, clearSuppression: true };
   }
   if (event === "delta" && suppressDeltas) {
+    // Tool deltas are additive (index-addressed) — safe to pass through.
+    // Content/thinking deltas carry partial text that would overwrite the
+    // snapshot's complete text — must suppress.
+    if (deltaType === "tool_start" || deltaType === "tool_complete") {
+      return { send: true, clearSuppression: false };
+    }
     return { send: false, clearSuppression: false };
   }
   return { send: true, clearSuppression: false };

@@ -1725,10 +1725,21 @@ describe("shouldSendEvent", () => {
     expect(result.clearSuppression).toBe(true);
   });
 
-  it("suppresses delta events when flag is set", () => {
-    const result = shouldSendEvent("delta", true);
-    expect(result.send).toBe(false);
-    expect(result.clearSuppression).toBe(false);
+  it("suppresses content/thinking delta events when flag is set", () => {
+    expect(shouldSendEvent("delta", true, "content").send).toBe(false);
+    expect(shouldSendEvent("delta", true, "thinking_content").send).toBe(false);
+    // Untyped deltas also suppressed (defensive)
+    expect(shouldSendEvent("delta", true).send).toBe(false);
+  });
+
+  it("passes tool_start/tool_complete through suppression (gdn-wemazo)", () => {
+    const ts = shouldSendEvent("delta", true, "tool_start");
+    expect(ts.send).toBe(true);
+    expect(ts.clearSuppression).toBe(false);
+
+    const tc = shouldSendEvent("delta", true, "tool_complete");
+    expect(tc.send).toBe(true);
+    expect(tc.clearSuppression).toBe(false);
   });
 
   it("sends delta events when not suppressed", () => {
@@ -1753,13 +1764,21 @@ describe("shouldSendEvent", () => {
     // Client reconnects mid-turn → suppressDeltas = true
     let suppressed = true;
 
-    // Deltas are suppressed
-    const d1 = shouldSendEvent("delta", suppressed);
+    // Content deltas are suppressed
+    const d1 = shouldSendEvent("delta", suppressed, "content");
     expect(d1.send).toBe(false);
 
-    // More deltas still suppressed
-    const d2 = shouldSendEvent("delta", suppressed);
+    // Tool deltas pass through (gdn-wemazo — agents dispatched after reconnect)
+    const ts = shouldSendEvent("delta", suppressed, "tool_start");
+    expect(ts.send).toBe(true);
+
+    // More content deltas still suppressed
+    const d2 = shouldSendEvent("delta", suppressed, "thinking_content");
     expect(d2.send).toBe(false);
+
+    // Tool complete also passes through
+    const tc = shouldSendEvent("delta", suppressed, "tool_complete");
+    expect(tc.send).toBe(true);
 
     // Turn ends → state broadcast clears flag
     const s1 = shouldSendEvent("state", suppressed);

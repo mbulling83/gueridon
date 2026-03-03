@@ -24,8 +24,11 @@ let publicKey = "";
 // Subscription keyed by endpoint URL (deduplicates re-subscribes)
 let subscriptions: Map<string, webpush.PushSubscription> = new Map();
 
-// Safety cap — prevents unbounded growth across SW re-registrations
-const MAX_SUBSCRIPTIONS = 5;
+// Safety cap — prevents unbounded growth across SW re-registrations.
+// Low cap: a single phone typically has 1 active SW (home screen PWA).
+// Higher values cause duplicate notifications because tag-based dedup
+// only works within one SW scope — different SWs each show their own.
+const MAX_SUBSCRIPTIONS = 2;
 
 function init(): void {
   if (!existsSync(VAPID_PATH)) {

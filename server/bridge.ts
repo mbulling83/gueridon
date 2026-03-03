@@ -186,8 +186,9 @@ function cleanupClient(client: SSEClient): void {
 
 function broadcastToSession(session: Session, event: string, data: unknown): void {
   const payload = { folder: session.folderName, ...(data as Record<string, unknown>) };
+  const deltaType = event === "delta" ? (payload as Record<string, unknown>).type as string | undefined : undefined;
   for (const client of session.clients) {
-    const decision = shouldSendEvent(event, client.suppressDeltas);
+    const decision = shouldSendEvent(event, client.suppressDeltas, deltaType);
     if (decision.clearSuppression) client.suppressDeltas = false;
     if (!decision.send) continue;
     sendSSE(client, event, payload);
