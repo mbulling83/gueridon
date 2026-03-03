@@ -721,7 +721,22 @@ function renderStagedDeposits() {
 }
 
 // Configure marked — GFM for tables/task lists/strikethrough, no <br> on single newlines
-marked.setOptions({ gfm: true, breaks: false });
+marked.use({ gfm: true, breaks: false, renderer: {
+  // Wrap tables in a scroll container so wide tables scroll independently
+  // instead of dragging the entire viewport sideways on mobile
+  table(token) {
+    let header = '', body = '';
+    for (const cell of token.header) header += this.tablecell(cell);
+    header = this.tablerow({ text: header });
+    for (const row of token.rows) {
+      let rowContent = '';
+      for (const cell of row) rowContent += this.tablecell(cell);
+      body += this.tablerow({ text: rowContent });
+    }
+    if (body) body = `<tbody>${body}</tbody>`;
+    return `<div class="table-wrap"><table>\n<thead>\n${header}</thead>\n${body}</table></div>\n`;
+  }
+}});
 
 
 // renderStatusBar, renderSwitcher, updatePlaceholder, updateSendButton now in /render-chrome.js

@@ -169,9 +169,16 @@ body {
 
 .msg-assistant li { margin-bottom: 2px; }
 
+/* Table scroll wrapper — contains wide tables so they scroll independently
+   instead of dragging the viewport sideways on mobile. */
+.table-wrap {
+  overflow-x: auto;
+  margin: 8px 0;
+  -webkit-overflow-scrolling: touch;
+}
+
 .msg-assistant table {
   border-collapse: collapse;
-  margin: 8px 0;
   font-size: 0.82rem;
   width: 100%;
   color: var(--text-mid);
