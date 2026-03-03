@@ -42,6 +42,9 @@ import {
   type PendingDelta,
   type SessionProcessInfo,
   type ShutdownContext,
+  type RestartReason,
+  type LastToolCall,
+  STALE_SESSION_MS,
 } from "./bridge-logic.js";
 
 import {
@@ -122,7 +125,12 @@ interface Session {
   turnStartedAt: number | null;
   /** True if an ask-user push was already sent this turn — suppresses turn-complete push. */
   pushedAskThisTurn: boolean;
-  wasInterrupted?: boolean;
+  /** Resume context stashed at session creation, consumed on first prompt (gdn-jeliku). */
+  pendingResume?: {
+    reason: RestartReason;
+    lastToolCall: LastToolCall | null;
+    sessionAge: number;
+  };
   /** Filename from share-sheet upload, used to enrich push notifications. */
   shareContext?: { filename: string };
   /** Why the process was killed — set before SIGTERM, read in exit handler for user-facing message. */
@@ -715,9 +723,21 @@ async function createSession(folderPath: string): Promise<Session> {
       session.stateBuilder.replayFromJSONL(events);
       emit({ type: "replay:ok", folder: folderName, eventCount: events.length, ...(skippedLines > 0 && { skippedLines }) });
 
-      // Any resumable session should auto-resume after bridge restart.
-      // CC was killed (orphan reap or shutdown) — the user expects continuity.
-      session.wasInterrupted = true;
+      // Stash resume context for lazy injection on first prompt (gdn-jeliku).
+      // CC won't spawn until the user actually sends something.
+      const sessionAge = Date.now() - (latestSession?.lastActive?.getTime() ?? 0);
+      let lastToolCall = null;
+      try {
+        const tail = await tailRead(jsonlPath, 8192);
+        if (tail) lastToolCall = extractLastToolCall(tail);
+      } catch { /* JSONL tail read may fail */ }
+
+      session.pendingResume = {
+        reason: classifyRestart(lastShutdownCtx, folderPath),
+        lastToolCall,
+        sessionAge,
+      };
+
       const replayState = session.stateBuilder.getState();
       emit({
         type: "session:interrupted",
@@ -901,33 +921,9 @@ async function handleSession(
     });
   }
 
-  // Lazy spawn: CC starts on first prompt, not on session connect.
-  // This avoids cold starts when the user browses folders without sending.
-  // deliverPrompt() handles spawn-if-needed.
-  //
-  // Exception: after bridge restart, any resumable session auto-spawns CC
-  // so Claude picks up without the user having to nudge.
-  if (session.wasInterrupted) {
-    session.wasInterrupted = false; // one-shot
-    const reason = classifyRestart(lastShutdownCtx, session.folder);
-
-    // Extract last tool call from JSONL tail for context-aware resume injection (gdn-hubohe)
-    let lastToolCall = null;
-    try {
-      const jsonlPath = getSessionJSONLPath(session.folder, session.id);
-      const tail = await tailRead(jsonlPath, 8192);
-      if (tail) lastToolCall = extractLastToolCall(tail);
-    } catch { /* JSONL may not exist yet */ }
-
-    deliverPrompt(session, {
-      text: buildResumeInjection(reason, lastToolCall),
-    });
-    // Broadcast state so the synthetic resume message renders immediately
-    broadcastToSession(session, "state", {
-      ...session.stateBuilder.getState(),
-    });
-    emit({ type: "session:auto-resume", folder: session.folderName, sessionId: session.id });
-  }
+  // Lazy spawn: CC starts on first prompt, not on session connect (gdn-jeliku).
+  // Resume context (if any) is stashed in session.pendingResume and injected
+  // alongside the user's first prompt in handlePrompt().
 
   res.writeHead(200, { "Content-Type": "application/json" });
   res.end(JSON.stringify({
@@ -985,7 +981,26 @@ async function handlePrompt(
     return;
   }
 
-  deliverPrompt(session, parsed);
+  // Consume pending resume context on first prompt (gdn-jeliku).
+  // Only "self-caused" restarts get the injection — that's the session whose
+  // action triggered the bridge restart (e.g. self-deploy). Other sessions
+  // were just bystanders and don't need restart context.
+  if (session.pendingResume) {
+    const { reason, lastToolCall, sessionAge } = session.pendingResume;
+    session.pendingResume = undefined;
+
+    if (reason === "self-caused") {
+      const resumeText = buildResumeInjection(reason, sessionAge > STALE_SESSION_MS ? null : lastToolCall);
+      const combined = resumeText + "\n\n" + (parsed.text || "");
+      deliverPrompt(session, { text: combined, content: parsed.content });
+    } else {
+      deliverPrompt(session, parsed);
+    }
+    emit({ type: "session:lazy-resume", folder: session.folderName, sessionId: session.id, sessionAge });
+  } else {
+    deliverPrompt(session, parsed);
+  }
+
   res.writeHead(200, { "Content-Type": "application/json" });
   res.end(JSON.stringify({ delivered: true }));
 }
@@ -1071,7 +1086,20 @@ async function handleUpload(req: IncomingMessage, res: ServerResponse, folderPat
           }
         }
       } else {
-        deliverPrompt(session, { text: note });
+        // Consume pending resume context on upload too (gdn-jeliku)
+        if (session.pendingResume) {
+          const { reason, lastToolCall, sessionAge } = session.pendingResume;
+          session.pendingResume = undefined;
+          if (reason === "self-caused") {
+            const resumeText = buildResumeInjection(reason, sessionAge > STALE_SESSION_MS ? null : lastToolCall);
+            deliverPrompt(session, { text: resumeText + "\n\n" + note });
+          } else {
+            deliverPrompt(session, { text: note });
+          }
+          emit({ type: "session:lazy-resume", folder: session.folderName, sessionId: session.id, sessionAge });
+        } else {
+          deliverPrompt(session, { text: note });
+        }
       }
 
       // Broadcast state so the deposit message renders immediately

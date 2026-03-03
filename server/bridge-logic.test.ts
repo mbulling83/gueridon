@@ -22,6 +22,8 @@ import {
   shouldSendEvent,
   HANDOFF_STALE_THRESHOLD_MS,
   SHUTDOWN_STALE_MS,
+  STALE_SESSION_MS,
+  EXPIRED_SESSION_MS,
   LOCAL_CMD_TAIL_LINES,
   TOOL_SUMMARY_MAX_CHARS,
   CONFLATION_INTERVAL_MS,
@@ -217,6 +219,86 @@ describe("resolveSessionForFolder", () => {
         resumable: false,
         isReconnect: false,
       });
+    });
+  });
+
+  describe("expired session age gate (gdn-jeliku)", () => {
+    it("starts fresh when session is older than maxSessionAge", () => {
+      const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+      const result = resolveSessionForFolder(
+        null,
+        { id: "ancient-session", lastActive: eightDaysAgo },
+        null,
+        false,
+        fixedId,
+      );
+      expect(result).toEqual({
+        sessionId: "fresh-uuid-123",
+        resumable: false,
+        isReconnect: false,
+      });
+    });
+
+    it("resumes when session is younger than maxSessionAge", () => {
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+      const result = resolveSessionForFolder(
+        null,
+        { id: "recent-session", lastActive: twoHoursAgo },
+        null,
+        false,
+        fixedId,
+      );
+      expect(result).toEqual({
+        sessionId: "recent-session",
+        resumable: true,
+        isReconnect: false,
+      });
+    });
+
+    it("respects custom maxSessionAge", () => {
+      const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000);
+      const oneHourMs = 60 * 60 * 1000;
+      const result = resolveSessionForFolder(
+        null,
+        { id: "stale-session", lastActive: threeHoursAgo },
+        null,
+        false,
+        fixedId,
+        oneHourMs,
+      );
+      expect(result).toEqual({
+        sessionId: "fresh-uuid-123",
+        resumable: false,
+        isReconnect: false,
+      });
+    });
+
+    it("resumes when lastActive is missing (backward compat)", () => {
+      const result = resolveSessionForFolder(
+        null,
+        { id: "no-date-session" },
+        null,
+        false,
+        fixedId,
+      );
+      expect(result).toEqual({
+        sessionId: "no-date-session",
+        resumable: true,
+        isReconnect: false,
+      });
+    });
+
+    it("exit marker still takes priority over age", () => {
+      const recentDate = new Date(Date.now() - 1000);
+      const result = resolveSessionForFolder(
+        null,
+        { id: "exited-recent", lastActive: recentDate },
+        null,
+        true, // has .exit
+        fixedId,
+      );
+      expect(result.resumable).toBe(false);
+      expect(result.sessionId).toBe("fresh-uuid-123");
     });
   });
 });

@@ -50,7 +50,7 @@ export type BridgeEvent =
 
   // Session interruption & resume
   | { type: "session:interrupted"; folder: string; sessionId: string; midTurn: boolean }
-  | { type: "session:auto-resume"; folder: string; sessionId: string }
+  | { type: "session:lazy-resume"; folder: string; sessionId: string; sessionAge: number }
 
   // Handoff staleness
   | { type: "handoff:stale"; folder: string; sessionId: string }
@@ -119,7 +119,7 @@ const LEVEL_MAP: Record<BridgeEvent["type"], LogLevel> = {
   "orphan:sigkill": "warn",
   "orphan:summary": "info",
   "session:interrupted": "info",
-  "session:auto-resume": "info",
+  "session:lazy-resume": "info",
   "handoff:stale": "info",
   "replay:ok": "info",
   "replay:fail": "warn",

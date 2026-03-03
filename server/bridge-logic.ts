@@ -130,6 +130,12 @@ export interface ShutdownContext {
  */
 export const SHUTDOWN_STALE_MS = 24 * 60 * 60 * 1000;
 
+/** Session activity older than this → skip tool context in resume injection (stale). */
+export const STALE_SESSION_MS = 24 * 60 * 60 * 1000;
+
+/** Session activity older than this → start fresh, don't resume at all. */
+export const EXPIRED_SESSION_MS = 7 * 24 * 60 * 60 * 1000;
+
 export function classifyRestart(
   shutdownCtx: ShutdownContext | null,
   folder: string,
@@ -220,10 +226,11 @@ export interface SessionResolution {
  */
 export function resolveSessionForFolder(
   existingBridgeSession: { id: string; resumable: boolean } | null,
-  latestSessionFile: { id: string } | null,
+  latestSessionFile: { id: string; lastActive?: Date } | null,
   handoffSessionId: string | null,
   hasExit: boolean,
   generateId: () => string,
+  maxSessionAge: number = EXPIRED_SESSION_MS,
 ): SessionResolution {
   // Multi-WS reconnect: another tab already connected this folder
   if (existingBridgeSession) {
@@ -261,7 +268,19 @@ export function resolveSessionForFolder(
     };
   }
 
-  // Session exists, no matching close signal → resume
+  // Session too old to resume meaningfully → start fresh (gdn-jeliku)
+  if (latestSessionFile.lastActive) {
+    const age = Date.now() - latestSessionFile.lastActive.getTime();
+    if (age > maxSessionAge) {
+      return {
+        sessionId: generateId(),
+        resumable: false,
+        isReconnect: false,
+      };
+    }
+  }
+
+  // Session exists, no matching close signal, recent enough → resume
   return {
     sessionId: latestSessionFile.id,
     resumable: true,
