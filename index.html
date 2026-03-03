@@ -460,10 +460,16 @@ function handleSSEDelta(data) {
     }
 
     case 'tool_complete': {
-      const last = liveState.messages[liveState.messages.length - 1];
-      if (last?.tool_calls?.[data.index]) {
-        last.tool_calls[data.index].status = data.status;
-        if (data.output) last.tool_calls[data.index].output = data.output;
+      // Search backwards — tool_complete may arrive after message_start pushed
+      // a new assistant message, so the tool lives in a previous message.
+      // Match on index AND status=running to avoid updating the wrong tool.
+      for (let i = liveState.messages.length - 1; i >= 0; i--) {
+        const tc = liveState.messages[i]?.tool_calls?.[data.index];
+        if (tc && tc.status === 'running') {
+          tc.status = data.status;
+          if (data.output) tc.output = data.output;
+          break;
+        }
       }
       break;
     }
