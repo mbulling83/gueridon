@@ -109,7 +109,7 @@ The bridge is split across several modules in `server/`:
 - **SIGTERM → SIGKILL:** 3s escalation on all process kills.
 - **Orphan reaping:** On startup, reads sse-sessions.json, SIGTERMs any live CC processes from the previous bridge instance.
 - **Mid-turn message delivery:** When a prompt or upload arrives during an active turn, the bridge writes it directly to CC's stdin (CC buffers and processes it as the next turn). State builder tracks it immediately so the frontend shows the message. No queue, no coalescing — each message becomes a separate CC turn. Both `handlePrompt()` and `handleUpload()` use this path.
-- **Mid-turn reconnect suppression:** When an SSE client reconnects during an active turn, `attachToSession` sets `client.suppressDeltas = true`. The state snapshot the client receives is authoritative. Delta events are suppressed until the next state broadcast (turn end), preventing partial content chunks from overwriting the snapshot's complete text. Logic extracted as `shouldSendEvent()` in `bridge-logic.ts`.
+- **Mid-turn reconnect suppression:** When an SSE client reconnects during an active turn, `attachToSession` sets `client.suppressDeltas = true`. The state snapshot the client receives is authoritative. Content/thinking deltas are suppressed until the next state broadcast (turn end), preventing partial chunks from overwriting the snapshot's complete text. **Tool deltas (`tool_start`, `tool_complete`) pass through** — they're index-addressed and additive, can't corrupt text. Without this, tools dispatched after a mid-turn reconnect are invisible until turn end (gdn-wemazo root cause). Logic extracted as `shouldSendEvent()` in `bridge-logic.ts`.
 - **Upload staging:** `POST /upload/:folder?stage=true` deposits files on disk and returns the manifest without injecting a prompt. The client stages deposits as pills below the textarea; on send, `buildDepositNoteClient()` composes deposit notes + user text as one prompt. Without `?stage=true` (share-sheet flow), upload auto-injects as before.
 - **`[guéridon:*]` prefix convention:** Bridge-injected messages use `[guéridon:system]`, `[guéridon:upload]` etc. StateBuilder detects these and marks as `synthetic: true` (rendered as system chips, prefix stripped). **Exception:** staged uploads contain a deposit note followed by user text — StateBuilder checks for text after the deposit suffix and keeps these as real user messages. The client's `renderUserBubble()` parses deposit notes into `📎 filename` references.
 - **Deposit note parity:** `buildDepositNoteClient()` in `client/render-utils.cjs` (single source of truth) must exactly match `buildDepositNote()` in `server/upload.ts`. The parity gate test in `upload.test.ts` imports the real client function. `renderUserBubble()` also parses this format — three places coupled to one template.
@@ -139,6 +139,20 @@ claude -p --verbose \
 - `--session-id <uuid>` for fresh sessions; `--resume <uuid>` for resuming after process kill. Decided by `resolveSessionForFolder()` in `bridge-logic.ts`.
 - **Local commands (`/context`, `/cost`, `/compact`) produce NO stdout.** Bridge reads JSONL tail on empty-result turns to recover output.
 - **Input format** (critical): `{"type":"user","message":{"role":"user","content":"..."}}`
+
+### `--include-partial-messages` Emission Pattern
+
+CC emits partial `assistant` events after each `content_block_stop`. Each partial is **incremental** — it contains only the NEW content block, not all blocks so far. Verified from real JSONL (3-agent dispatch):
+
+```
+partial 0: content=[thinking]         stop_reason=null
+partial 1: content=[text]             stop_reason=null
+partial 2: content=[tool_use Agent1]  stop_reason=null
+partial 3: content=[tool_use Agent2]  stop_reason=null
+partial 4: content=[tool_use Agent3]  stop_reason=tool_use
+```
+
+`parseSessionJSONL` merges same-ID partials by concatenating content arrays — correct for incremental emissions. The state builder deduplicates by `msg_id`, processing only the first partial; subsequent tool blocks arrive via `content_block_start/stop` streaming events and patch the committed message.
 
 ### CC Init Hang Diagnosis Checklist
 
