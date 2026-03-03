@@ -324,7 +324,11 @@ body {
 /* === Input area === */
 /* Sticky: stays at viewport bottom while document scrolls.
    will-change: transform promotes to compositor layer, preventing
-   sticky flicker during iOS keyboard animation. */
+   sticky flicker during iOS keyboard animation.
+   Negative margin-top pulls the input up into the messages' bottom padding,
+   eliminating the grey gap at the document bottom and on empty screens.
+   During scroll the sticky offset overrides — the padding still provides
+   scroll clearance behind the input. */
 .input-area {
   flex-shrink: 0;
   position: sticky;
@@ -334,6 +338,7 @@ body {
   background: var(--surface);
   border-top: 1px solid var(--border);
   padding: 8px 14px var(--safe-bottom);
+  margin-top: calc(-90px - var(--safe-bottom));
   display: flex;
   flex-direction: column;
   gap: 8px;
