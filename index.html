@@ -330,12 +330,8 @@ function sseConnect() {
   };
 
   sseSource.onopen = () => {
-    // Fires on initial connect and each reconnect.
-    // Set connected immediately to reduce grey-flash duration — hello
-    // event confirms the handshake but the transport is already live.
-    liveState.connection = 'connected';
+    // Fires on initial connect and each reconnect
     sseResetWatchdog();
-    sseRender();
   };
 }
 
@@ -974,12 +970,14 @@ sendBtn.addEventListener('click', () => {
 
     // Send via SSE bridge
     if (bridgeUrl && sseCurrentFolder) {
-      // Optimistic busy — show working state immediately rather than waiting
-      // for the bridge to echo it back via SSE (can lag during CC resume).
-      liveState.status = 'working';
-      document.body.dataset.busy = 'true';
-      refreshSendButton();
-      ssePostPrompt(sseCurrentFolder, text);
+      // Disable send button immediately — honest "sent" state.
+      // The bridge's SSE state event will set the real busy/idle status.
+      sendBtn.dataset.active = 'false';
+      sendBtn.disabled = true;
+      ssePostPrompt(sseCurrentFolder, text).then(result => {
+        sendBtn.disabled = false;
+        if (!result.ok) refreshSendButton();
+      });
     }
 
     // Clear staging
