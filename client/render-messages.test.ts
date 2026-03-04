@@ -18,7 +18,7 @@ Object.defineProperty(navigator, "clipboard", {
 require("./render-chips.cjs");
 
 const { buildDepositNoteClient } = require("./render-utils.cjs" as string);
-const { renderUserBubble, addCopyButtons, renderMessages } = require(
+const { renderUserBubble, addCopyButtons, renderMessages, truncateAutolinks } = require(
   "./render-messages.cjs" as string,
 );
 
@@ -103,6 +103,54 @@ describe("renderUserBubble", () => {
 
   it("returns empty string for empty content", () => {
     expect(renderUserBubble("")).toBe("");
+  });
+});
+
+// ============================================================
+// truncateAutolinks — URL shortening in user bubbles
+// ============================================================
+describe("truncateAutolinks", () => {
+  it("truncates autolinked URL to host/\u2026", () => {
+    const html = '<a href="https://docs.google.com/document/d/abc123">https://docs.google.com/document/d/abc123</a>';
+    expect(truncateAutolinks(html)).toBe('<a href="https://docs.google.com/document/d/abc123">docs.google.com/\u2026</a>');
+  });
+
+  it("shows host only for root URL (no path)", () => {
+    const html = '<a href="https://example.com">https://example.com</a>';
+    expect(truncateAutolinks(html)).toBe('<a href="https://example.com">example.com</a>');
+  });
+
+  it("shows host only for URL with just trailing slash", () => {
+    const html = '<a href="https://example.com/">https://example.com/</a>';
+    expect(truncateAutolinks(html)).toBe('<a href="https://example.com/">example.com</a>');
+  });
+
+  it("leaves manual markdown links alone (text !== href)", () => {
+    const html = '<a href="https://example.com/long/path">click here</a>';
+    expect(truncateAutolinks(html)).toBe(html);
+  });
+
+  it("handles multiple autolinks in one string", () => {
+    const html = 'See <a href="https://a.com/x">https://a.com/x</a> and <a href="https://b.com/y">https://b.com/y</a>';
+    const result = truncateAutolinks(html);
+    expect(result).toContain('a.com/\u2026');
+    expect(result).toContain('b.com/\u2026');
+  });
+
+  it("passes through non-link HTML unchanged", () => {
+    const html = '<strong>hello</strong> world';
+    expect(truncateAutolinks(html)).toBe(html);
+  });
+});
+
+// ============================================================
+// renderUserBubble integration with truncateAutolinks
+// ============================================================
+describe("renderUserBubble URL truncation", () => {
+  it("truncates bare URL in user message", () => {
+    const html = renderUserBubble("Check https://docs.google.com/document/d/abc123");
+    expect(html).toContain('docs.google.com/\u2026');
+    expect(html).toContain('href="https://docs.google.com/document/d/abc123"');
   });
 });
 

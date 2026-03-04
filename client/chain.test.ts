@@ -43,7 +43,7 @@ const EXPECTED_EXPORTS: Record<string, string[]> = {
     "renderChip", "renderThinkingChip", "renderLocalCommand", "attachCopyButton",
   ],
   "render-messages": [
-    "renderUserBubble", "addCopyButtons", "renderMessages",
+    "renderUserBubble", "addCopyButtons", "renderMessages", "truncateAutolinks",
   ],
   "render-chrome": [
     "renderStatusBar", "renderSwitcher", "updatePlaceholder", "updateSendButton",

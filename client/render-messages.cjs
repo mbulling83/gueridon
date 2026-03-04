@@ -52,8 +52,23 @@ function renderUserBubble(content) {
   remaining = remaining.replace(/^\n+/, '').replace(/\n+$/, '');
   let html = '';
   if (fileNames.length > 0) html += `<div class="msg-files">\u{1F4CE} ${fileNames.join(', ')}</div>`;
-  if (remaining) html += _marked.parseInline(remaining);
+  if (remaining) html += truncateAutolinks(_marked.parseInline(remaining));
   return html;
+}
+
+/**
+ * Truncate autolinked URLs: <a href="URL">URL</a> → <a href="URL">host/…</a>
+ * Only matches when anchor text is the raw URL (autolinked), not manual markdown links.
+ */
+function truncateAutolinks(html) {
+  return html.replace(/<a href="(https?:\/\/[^"]+)">([^<]+)<\/a>/g, function(match, href, text) {
+    if (href !== text) return match; // manual markdown link — leave alone
+    try {
+      const u = new URL(href);
+      const display = u.host + (u.pathname.length > 1 ? '/\u2026' : '');
+      return '<a href="' + href + '">' + display + '</a>';
+    } catch { return match; }
+  });
 }
 
 /**
@@ -195,7 +210,7 @@ function renderMessages(container, messages, opts) {
 }
 
 // --- Exports ---
-const mod = { addCopyButtons, renderUserBubble, renderMessages };
+const mod = { addCopyButtons, renderUserBubble, renderMessages, truncateAutolinks };
 if (typeof window !== 'undefined') window.Gdn = { ...window.Gdn, ...mod };
 if (typeof module !== 'undefined') module.exports = mod;
 })();
