@@ -1360,11 +1360,11 @@ function ensureAudioCtx() {
       const gain = ctx.createGain();
       osc.connect(gain);
       gain.connect(ctx.destination);
-      osc.frequency.value = 880;
-      gain.gain.value = 0.15;
+      osc.frequency.value = 350;
+      gain.gain.value = 0.06;
       osc.start();
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
-      osc.stop(ctx.currentTime + 0.2);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+      osc.stop(ctx.currentTime + 0.3);
     } catch(e) {}
   }
 
