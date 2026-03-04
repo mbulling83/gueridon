@@ -1,114 +1,99 @@
-# Idle Guards Design
+# Grace Timer Design
 
-**Problem:** Bridge kills CC after 5 minutes of no WS clients, regardless of whether CC is mid-turn. Long tool executions (test suites, multi-file refactors) get killed.
+**Problem:** Bridge kills CC after 5 minutes of no SSE clients, regardless of whether CC is mid-turn or the user is momentarily disconnected (iOS Safari drops SSE frequently).
 
-**Solution:** Replace single timer with "check + guards" pattern. When idle timer fires, consult guards before killing. Guards can defer the kill.
+**Solution:** `maybeStartGraceTimer` — a simple precondition + recency check before starting a 5-minute kill countdown. No guard interface, no recheck loop.
 
 ## Architecture
 
 ```
-last client disconnects
-  → record idleStart, schedule checkIdle in IDLE_TIMEOUT_MS
+Last SSE client disconnects (or CC finishes a turn with no audience)
+  → maybeStartGraceTimer()
+    → preconditions: no clients, process alive, not mid-turn
+    → recency: prompt within 10 min? skip. Output within 10 min? skip.
+    → all pass → start 5-minute grace timer
 
-checkIdle fires
-  → safety cap exceeded? → kill
-  → any guard says keepAlive? → log reason, schedule recheck in recheckMs
-  → no guard keeping alive, but guard WAS deferred last check? → grace period (restart countdown)
-  → grace period elapsed → kill
+Client reconnects OR new prompt arrives
+  → cancel grace timer
 
-client reconnects at any point
-  → cancel idleCheckTimer, clear idle state
+Grace timer expires
+  → SIGTERM → SIGKILL (3s escalation) → delete session
 ```
 
-## Pure function: checkIdle
+## Decision function: `maybeStartGraceTimer()`
 
-Returns an action — no side effects, fully testable:
+Three preconditions must ALL pass:
 
-```typescript
-type IdleAction =
-  | { action: 'kill'; reason: string }
-  | { action: 'recheck'; delayMs: number; guardDeferred: boolean; reason: string }
-```
+| Precondition | Field | Rationale |
+|--------------|-------|-----------|
+| No audience | `clients.size === 0` | Someone's watching — don't kill |
+| Process alive | `session.process` | Nothing to kill |
+| Not mid-turn | `!turnInProgress` | CC is working — let it finish |
 
-`guardDeferred` tells the caller what to store for the next check cycle.
+Then two recency guards can still abort:
 
-**Grace period mechanism:** When `guardWasDeferred` was true on entry but no guard defers now, CC just transitioned from "working" to "idle." Return `{ action: 'recheck', delayMs: IDLE_TIMEOUT_MS, guardDeferred: false }` — a full idle countdown before killing. If the grace period elapses and nothing changes, next check kills.
+| Guard | Field | Window | Rationale |
+|-------|-------|--------|-----------|
+| Prompt recency | `lastPromptAt` | 10 min | User active but iOS dropped SSE |
+| Output recency | `lastOutputTime` | 10 min | CC just finished a long agentic run |
 
-## Guard interface
+If all pass, `startGraceTimer()` begins a 5-minute countdown.
 
-```typescript
-interface IdleGuard {
-  name: string;
-  shouldKeepAlive(state: IdleSessionState, now?: number): {
-    keep: boolean;
-    reason?: string;
-    recheckMs?: number;  // default IDLE_RECHECK_MS (30s)
-  };
-}
-```
+## Call sites
 
-**Composition:** ANY guard can keep alive. Safety cap is checked BEFORE guards (inviolable).
+`maybeStartGraceTimer` is called at exactly two moments — the two transitions that can make a session "idle with no audience":
 
-## ActiveTurnGuard (first extension)
+| Trigger | Function | Why |
+|---------|----------|-----|
+| SSE client disconnects | `detachFromSession()` | Last viewer left |
+| CC finishes a turn | `onTurnComplete()` | CC stopped working (no one watching) |
 
-Defers when `turnInProgress && hasRecentOutput`. Two signals:
-- **Protocol state:** prompt sent to stdin without corresponding `result` on stdout
-- **Staleness:** stdout has produced output within `STALE_OUTPUT_MS`
+## Cancellation
 
-If mid-turn but no output for 10 minutes: guard declines to keep alive (CC likely stuck). Safety cap catches the rest.
+| Event | Where | Reason |
+|-------|-------|--------|
+| Client reconnects | `attachToSession()` | `"client-reconnect"` |
+| New prompt arrives | `deliverPrompt()` | `"prompt-arrived"` |
 
-## Constants (env var overridable)
+Both clear the timer and emit `grace:cancel`.
 
-| Constant | Default | Env var | Purpose |
-|----------|---------|---------|---------|
-| `IDLE_TIMEOUT_MS` | 5 min | `IDLE_TIMEOUT_MS` | Time before first idle check (existing) |
-| `MAX_IDLE_MS` | 30 min | `MAX_IDLE_MS` | Absolute cap since client disconnect |
-| `STALE_OUTPUT_MS` | 10 min | `STALE_OUTPUT_MS` | Stdout silence → "probably stuck" |
-| `IDLE_RECHECK_MS` | 30s | (not configurable) | Guard recheck interval |
+## Events
 
-## Session state additions
+| Event | Severity | When |
+|-------|----------|------|
+| `grace:start` | info | Timer started (5 min countdown) |
+| `grace:skip` | debug | Precondition or recency guard prevented timer |
+| `grace:cancel` | info | Client reconnected or prompt arrived |
+| `grace:expire` | info | Timer fired — process killed, session deleted |
 
-```typescript
-// Add to Session interface:
-turnInProgress: boolean;       // true between user prompt and result event
-lastOutputTime: number | null; // updated on every stdout line
-idleStart: number | null;      // when last client disconnected
-idleCheckTimer: ReturnType<typeof setTimeout> | null;  // replaces idleTimer
-guardWasDeferred: boolean;     // for grace period detection
-```
+## Constants
 
-Remove: `idleTimer` field.
+| Constant | Default | Env override | Purpose |
+|----------|---------|-------------|---------|
+| `GRACE_MS` | 5 min | `GRACE_MS` | Kill countdown after all guards pass |
+| `RECENCY_MS` | 10 min | (hardcoded) | Prompt/output recency window |
+| `KILL_ESCALATION_MS` | 3s | (hardcoded) | SIGTERM → SIGKILL escalation |
 
-## Turn lifecycle (precise set/clear points)
+## Timing
 
-| Event | Where in bridge.ts | State change |
-|-------|-------------------|--------------|
-| User prompt written to stdin | `handleSessionMessage` prompt case, after `writeToStdin` succeeds | `turnInProgress = true` |
-| `result` event parsed from stdout | `wireProcessToSession` rl.on('line'), check `event.type === 'result'` | `turnInProgress = false` |
-| Process exit | `proc.on('exit')` | `turnInProgress = false` |
-| Any stdout line parsed | `wireProcessToSession` rl.on('line') | `lastOutputTime = Date.now()` |
+- **Best case** (no recent activity when last client disconnects): 5 minutes to kill.
+- **Worst case** (user just sent something, then walks away): 10 min recency + 5 min grace = 15 minutes.
 
-## bridge.ts changes (clean replacement)
+## Turn lifecycle
 
-> **Note (2026-02):** The bridge transport changed from WebSocket to SSE+POST after this design was written. The wiring points below reference WebSocket handlers (`ws.on('close')`, `attachWsToSession`) that no longer exist. The equivalent triggers in the current architecture are SSE client disconnect and SSE client connect. The pure function design (`checkIdle`, guards, constants) is transport-agnostic and still applies.
+| Event | State change |
+|-------|-------------|
+| Prompt written to CC stdin | `turnInProgress = true`, `lastPromptAt = now` |
+| CC emits `result` event | `turnInProgress = false` |
+| CC process exits | `turnInProgress = false` (safety net) |
+| Any CC stdout line | `lastOutputTime = now` |
 
-## What lives where
+## Init timeout (separate mechanism)
 
-| File | What goes there |
-|------|----------------|
-| `bridge-logic.ts` | `IdleGuard`, `IdleSessionState`, `IdleAction`, `checkIdle()`, `createActiveTurnGuard()`, constants |
-| `bridge-logic.test.ts` | Pure function tests for checkIdle + activeTurnGuard |
-| `bridge.ts` | Session state additions, wiring (startIdleCheck/cancelIdleCheck), turn tracking |
+A 30-second init timeout catches CC processes that hang during startup (e.g. missing `mcpServers` key in config — see CC Init Hang Diagnosis in CLAUDE.md). Uses `session.initTimer`, fires `init:timeout`, kills the process. Cleared on first CC output. Unrelated to the grace timer.
 
-## Edge cases handled
+## Known gaps
 
-| Scenario | Outcome |
-|----------|---------|
-| CC finishes during idle → client returns 1 min later | Grace period (5 min) running, process still alive |
-| CC finishes during idle → nobody returns | Grace period elapses, kill after idle+grace time |
-| CC stuck mid-turn, no stdout for 10 min | Staleness check declines to keep alive, killed at next recheck |
-| CC stuck mid-turn, staleness check not reached before 30 min | Safety cap kills |
-| Process crashes mid-turn | Exit handler clears turnInProgress, normal idle proceeds |
-| Client reconnects during deferred check | cancelIdleCheck, normal flow |
-| Compaction flickers result event | Grace period starts, CC immediately re-activates, guard defers again |
-| Multiple prompts/turns while client away | turnInProgress stays true throughout multi-tool chain (result only at end) |
+- **No safety cap for stuck turns.** If `turnInProgress` stays true forever (CC hung mid-turn with a connected client), the grace timer never starts. There's no `MAX_IDLE_MS` absolute cap.
+- **No staleness detection.** If CC is "mid-turn" but hasn't produced stdout in hours, nothing notices. The old design had a `STALE_OUTPUT_MS` concept that was never implemented.
+- **Recency window is hardcoded.** `RECENCY_MS` can't be tuned via environment variable.

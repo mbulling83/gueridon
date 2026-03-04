@@ -444,7 +444,7 @@ body {
   background: var(--accent);
   animation: mic-pulse 1s ease-in-out infinite;
 }
-.btn-bar[data-listening="true"] .btn-lozenge {
+.btn-bar[data-listening="true"] .btn-lozenge.folder {
   border-color: var(--accent);
   color: var(--accent);
   animation: mic-pulse 1s ease-in-out infinite;
