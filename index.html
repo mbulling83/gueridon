@@ -890,7 +890,7 @@ document.getElementById('folderBtn').addEventListener('click', () => {
 });
 
 // Context lozenge: tap when amber/red offers exit, long-press always offers exit
-// PTT fires at 300ms on the bar — if isListening is true, skip the exit confirm.
+// PTT excludes context lozenge, so no conflict.
 {
   const contextBtn = document.getElementById('contextBtn');
   let longPressTimer = null;
@@ -899,7 +899,6 @@ document.getElementById('folderBtn').addEventListener('click', () => {
     didLongPress = false;
     longPressTimer = setTimeout(() => {
       didLongPress = true;
-      if (isListening) return; // PTT took over — don't show exit confirm
       if (sseCurrentFolder && confirm('End this session and return to the lobby?')) {
         exitSession();
       }
@@ -908,7 +907,6 @@ document.getElementById('folderBtn').addEventListener('click', () => {
   contextBtn.addEventListener('pointerup', () => {
     clearTimeout(longPressTimer);
     if (didLongPress) return;
-    if (isListening) return; // PTT active — suppress tap action
     const level = contextBtn.dataset.level;
     if ((level === 'low' || level === 'critical') && sseCurrentFolder) {
       if (confirm('Context is running high. End this session and start fresh?')) {
@@ -1326,10 +1324,10 @@ function ensureAudioCtx() {
       try { recognition.stop(); } catch(e) {}
     }
 
-    // Hold detection on the entire btn-bar (excluding send button)
+    // Hold detection on the entire btn-bar (excluding send button and context lozenge)
     btnBar.addEventListener('pointerdown', (e) => {
-      // Don't hijack the send button — it stays tap-only
-      if (e.target.closest('.btn-send')) return;
+      // Don't hijack send button (tap-only) or context lozenge (has its own long-press for exit)
+      if (e.target.closest('.btn-send') || e.target.closest('.btn-lozenge.context')) return;
       ensureAudioCtx();
       // If already listening, treat as stop + send
       if (isListening) {
@@ -1346,7 +1344,7 @@ function ensureAudioCtx() {
     });
 
     btnBar.addEventListener('pointerup', (e) => {
-      if (e.target.closest('.btn-send')) return;
+      if (e.target.closest('.btn-send') || e.target.closest('.btn-lozenge.context')) return;
       if (holdTimer) {
         clearTimeout(holdTimer);
         holdTimer = null;
