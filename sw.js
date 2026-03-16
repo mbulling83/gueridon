@@ -1,8 +1,13 @@
 // Guéridon service worker — push notification handlers + offline app shell cache.
 // Deep-link via hash fragments (/#folder-name).
 
-const CACHE_NAME = "gueridon-shell-v3";
-const SHELL_URLS = ["/", "/manifest.json", "/icon-192.svg", "/icon-512.svg", "/apple-touch-icon.png"];
+const CACHE_NAME = "gueridon-shell-v4";
+const SHELL_URLS = [
+  "/", "/manifest.json", "/icon-192.svg", "/icon-512.svg", "/apple-touch-icon.png",
+  "/marked.js",
+  "/render-utils.js", "/render-chips.js", "/render-messages.js",
+  "/render-chrome.js", "/render-overlays.js",
+];
 
 self.addEventListener("install", (event) => {
   // Precache the app shell so it loads offline
