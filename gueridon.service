@@ -9,6 +9,7 @@ WorkingDirectory=/opt/gueridon
 Environment=HOME=/home/modha
 Environment=PATH=/home/modha/.local/bin:/usr/local/bin:/usr/bin:/bin
 Environment=ENABLE_CLAUDEAI_MCP_SERVERS=false
+EnvironmentFile=-%h/.config/gueridon/env
 ExecStart=/opt/gueridon/node_modules/.bin/tsx server/bridge.ts
 KillMode=control-group
 Restart=always
